@@ -1,0 +1,131 @@
+---
+title: "Naomi’s Sleep Pattern"
+author: "Daddy"
+date: "September 25, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+```
+
+## Data cleaning
+
+```{r data cleaning}
+### read in data
+dataUse <- dataRaw <- read.csv("./data/log_for_naomi.csv")
+
+### deal with date
+dataUse$date <- as.Date(dataUse$date, "%m/%d/%y")
+
+### impute avg feed time for missing missing
+avgFeedDuration <- mean(dataUse$duration[dataUse$type == "feed"],na.rm=TRUE)
+dataUse$duration[is.na(dataUse$duration) & dataUse$type == "feed"] <- avgFeedDuration
+
+### create time var
+dataUse$startTime <- as.POSIXct(dataUse$time,format='%H:%M')
+dataUse$endTime <- as.POSIXct(dataUse$time,format='%H:%M') + dataUse$duration *60
+
+### comput the start time and end time into hours in a day
+todayDateTime <- as.POSIXct(Sys.time())
+diffSecond <- as.numeric(format(todayDateTime,"%H")) *60*60 + as.numeric(format(todayDateTime,"%M"))*60 + as.numeric(format(todayDateTime, "%S"))
+todayStart <- todayDateTime - diffSecond + 0
+
+dataUse$newStartTime <- as.numeric(round(dataUse$startTime - todayStart, digit=3))
+dataUse$newEndTime   <- as.numeric(round(dataUse$endTime - todayStart, digit=3))
+
+
+
+```
+
+## Plot
+
+
+```{r plot, fig.width = 12, fig.height = 6}
+### restrict to needed columns
+dataUse <- dataUse[, c("type", "newStartTime", "newEndTime")]
+### clean out missing
+missingIndex <- apply(is.na(dataUse),1,sum)
+dataUse <- dataUse[missingIndex == 0, ]
+
+
+#TODO: clean out sleep
+dataSleep <- dataUse[dataUse$type == "sleep", ]
+### time across 24 needs extra care
+fixIndex <- which((dataSleep$newStartTime < 24) & (dataSleep$newEndTime > 24))
+
+if(length(fixIndex) >= 1){
+    ### replace the fixIndex row by two new rows, separated by 24/0 hour
+    newRow <- do.call(rbind,lapply(fixIndex,function(i){
+        replaceRow <- rbind(dataSleep[i, ], dataSleep[i, ])
+        replaceRow[1, "newEndTime"] <- 24
+        replaceRow[2, "newStartTime"] <- 0
+        replaceRow[2, "newEndTime"] <- replaceRow[2, "newEndTime"]  - 24
+        replaceRow
+    }))
+    ### replace the across 24 hour rows by the new 2 rows
+    newDataSleep <- rbind(dataSleep[-fixIndex,], newRow)
+}
+
+### now newDataSleep is clean, copy it back to dataUse
+dataUse <- rbind(dataUse[dataUse$type != "sleep", ], newDataSleep)
+
+
+### restrict to feed and nap 
+dataUse <- dataUse[dataUse$type %in% c("feed", "nap", "sleep"),]
+
+
+### create a new type so ggplot can put them in scale
+dataUse$newType <- factor(dataUse$type)
+levels(dataUse$newType) <- length(unique(dataUse$newType)):1
+dataUse$newType <- as.numeric(as.character(dataUse$newType))
+
+
+### ggplot
+byHour <- 1
+p <- ggplot(dataUse, aes(xmin=newStartTime,
+                         xmax=newEndTime,
+                         ymin=newType-0.45,
+                         ymax=newType+0.45,
+                         fill=type))
+### control transparency
+p <- p+geom_rect(alpha = I(3/10))  
+
+### define x axis
+p <- p +  scale_x_continuous(limits=c(0,24),
+                breaks=seq(0,24,by=byHour),
+                labels=paste(seq(0,24,by=byHour),":00",sep=""), 
+                name = "Time")
+
+### define y axis
+p <- p + scale_y_discrete(limits = length(unique(dataUse$newType)):1,
+                     breaks = length(unique(dataUse$newType)):1, 
+                     labels = sort(unique(dataUse$type)),
+                     name = "Type"
+                     )
+
+p
+
+```
+
+## Feed
+```{r feed}
+dataFeed <- dataRaw[dataRaw$type == "feed",]
+
+### Use average to impute the missing
+avgFeedDuration <- mean(dataFeed$duration, na.rm = TRUE)
+dataFeed$duration[is.na(dataFeed$duration)] <- avgFeedDuration
+
+```
+
+
+
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
