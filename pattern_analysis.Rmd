@@ -1,5 +1,5 @@
 ---
-title: "Naomi’s Sleep Pattern"
+title: "Naomi’s Behavior Pattern"
 author: "Daddy"
 date: "September 25, 2016"
 output: html_document
@@ -19,8 +19,8 @@ dataUse <- dataRaw <- read.csv("./data/log_for_naomi.csv")
 ### deal with date
 dataUse$date <- as.Date(dataUse$date, "%m/%d/%y")
 
-### impute avg feed time for missing missing
-avgFeedDuration <- mean(dataUse$duration[dataUse$type == "feed"],na.rm=TRUE)
+### impute avg feed time for missing duration
+avgFeedDuration <- mean(dataUse$duration[dataUse$type == "feed"], na.rm=TRUE)
 dataUse$duration[is.na(dataUse$duration) & dataUse$type == "feed"] <- avgFeedDuration
 
 ### create time var
@@ -28,27 +28,22 @@ dataUse$startTime <- as.POSIXct(dataUse$time,format='%H:%M')
 dataUse$endTime <- as.POSIXct(dataUse$time,format='%H:%M') + dataUse$duration *60
 
 ### comput the start time and end time into hours in a day
+
 todayDateTime <- as.POSIXct(Sys.time())
 diffSecond <- as.numeric(format(todayDateTime,"%H")) *60*60 + as.numeric(format(todayDateTime,"%M"))*60 + as.numeric(format(todayDateTime, "%S"))
 todayStart <- todayDateTime - diffSecond + 0
 
-dataUse$newStartTime <- as.numeric(round(dataUse$startTime - todayStart, digit=3))
-dataUse$newEndTime   <- as.numeric(round(dataUse$endTime - todayStart, digit=3))
 
+dataUse$newStartTime <- as.numeric(round((dataUse$startTime - todayStart)/60, digit=3)) 
+dataUse$newEndTime   <- as.numeric(round((dataUse$endTime - todayStart)/60, digit=3))
 
 
 ```
 
-## Plot
+## Routine Pattern
 
 
 ```{r plot, fig.width = 12, fig.height = 6}
-### restrict to needed columns
-dataUse <- dataUse[, c("type", "newStartTime", "newEndTime")]
-### clean out missing
-missingIndex <- apply(is.na(dataUse),1,sum)
-dataUse <- dataUse[missingIndex == 0, ]
-
 
 #TODO: clean out sleep
 dataSleep <- dataUse[dataUse$type == "sleep", ]
@@ -69,28 +64,28 @@ if(length(fixIndex) >= 1){
 }
 
 ### now newDataSleep is clean, copy it back to dataUse
-dataUse <- rbind(dataUse[dataUse$type != "sleep", ], newDataSleep)
+dataFixSleep <- rbind(dataUse[dataUse$type != "sleep", ], newDataSleep)
 
 
 ### restrict to feed and nap 
-dataUse <- dataUse[dataUse$type %in% c("feed", "nap", "sleep"),]
+dataFixSleep <- dataFixSleep[dataFixSleep$type %in% c("feed", "nap", "sleep"),]
 
 
 ### create a new type so ggplot can put them in scale
-dataUse$newType <- factor(dataUse$type)
-levels(dataUse$newType) <- length(unique(dataUse$newType)):1
-dataUse$newType <- as.numeric(as.character(dataUse$newType))
+dataFixSleep$newType <- factor(dataFixSleep$type)
+levels(dataFixSleep$newType) <- length(unique(dataFixSleep$newType)):1
+dataFixSleep$newType <- as.numeric(as.character(dataFixSleep$newType))
 
 
 ### ggplot
 byHour <- 1
-p <- ggplot(dataUse, aes(xmin=newStartTime,
+p <- ggplot(dataFixSleep, aes(xmin=newStartTime,
                          xmax=newEndTime,
                          ymin=newType-0.45,
                          ymax=newType+0.45,
                          fill=type))
 ### control transparency
-p <- p+geom_rect(alpha = I(3/10))  
+p <- p+geom_rect(alpha = I(1/10))  
 
 ### define x axis
 p <- p +  scale_x_continuous(limits=c(0,24),
@@ -99,33 +94,70 @@ p <- p +  scale_x_continuous(limits=c(0,24),
                 name = "Time")
 
 ### define y axis
-p <- p + scale_y_discrete(limits = length(unique(dataUse$newType)):1,
-                     breaks = length(unique(dataUse$newType)):1, 
-                     labels = sort(unique(dataUse$type)),
+p <- p + scale_y_discrete(limits = length(unique(dataFixSleep$newType)):1,
+                     breaks = length(unique(dataFixSleep$newType)):1, 
+                     labels = sort(unique(dataFixSleep$type)),
                      name = "Type"
                      )
-
-p
-
-```
-
-## Feed
-```{r feed}
-dataFeed <- dataRaw[dataRaw$type == "feed",]
-
-### Use average to impute the missing
-avgFeedDuration <- mean(dataFeed$duration, na.rm = TRUE)
-dataFeed$duration[is.na(dataFeed$duration)] <- avgFeedDuration
+### remove legend
+p + theme(legend.position="none")
 
 ```
 
+## Monitor counts and time
+```{r roll up}
+library(plyr)
+dataRoll <- ddply(dataUse,.(type,date),summarize, sum=sum(duration), n=length(duration))
+### create sleep and nap time
+dataSleepAndNap <- dataRoll[dataRoll$type %in% c("sleep", "nap"), c("date","sum")]
+dataRollSleepAndNap <- ddply(dataSleepAndNap, .(date), summarize, sum=sum(sum), n= NA)
+
+dataRollSleepAndNap <- data.frame(type = "sleepAndNap",dataRollSleepAndNap)
+
+dataRoll <- rbind(dataRoll, dataRollSleepAndNap)
+
+MonitorEachDay <- function(dataIn, selectType, timeOrCount = "time") {
+    dataTemp <- dataIn[dataIn$type == selectType,]
+    if(timeOrCount == "time") {
+        p <- ggplot(dataTemp, aes(x = date, y = sum/60 )) + 
+             geom_line() +
+             labs(title = paste("Total ",selectType," time per day", sep = "") ) + 
+             xlab("Date") +
+             ylab("Hours")
+    } else {
+        p <- ggplot(dataTemp, aes(x = date, y = n)) + 
+             geom_line() +
+             labs(title = paste("Total ",selectType," count per day", sep = "") ) + 
+             xlab("Date") +
+             ylab("")
+    }
+    p
+}
+
+MonitorEachDay(dataIn = dataRoll, selectType = "sleep", timeOrCoun = "time")
+MonitorEachDay(dataIn = dataRoll, selectType = "nap", timeOrCoun = "time")
+MonitorEachDay(dataIn = dataRoll, selectType = "sleepAndNap", timeOrCoun = "time")
+
+MonitorEachDay(dataIn = dataRoll, selectType = "nap", timeOrCoun = "count")
+MonitorEachDay(dataIn = dataRoll, selectType = "wet", timeOrCoun = "count")
+MonitorEachDay(dataIn = dataRoll, selectType = "poop", timeOrCoun = "count")
 
 
 
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+## Top 5 longest napping time
+
+```{r top}
+dataNap <- dataUse[dataUse$type == "nap",]
+dataNapSort <- dataNap[order(dataNap$duration, decreasing = TRUE),]
+dataNapTop5 <- dataNapSort[1:5, ]
+
+
+
+
+
+
+
+```
+
